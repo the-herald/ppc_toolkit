@@ -1,18 +1,24 @@
-# Use an official Python base image (3.10 is safe for google-ads 24.0.0)
-FROM python:3.10-slim
+# Use official Python image
+FROM python:3.11-slim
 
-# Set the working directory
+# Set working directory
 WORKDIR /app
 
-# Copy all project files into the container
-COPY . /app
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    build-essential \
+    libssl-dev \
+    libffi-dev \
+    && apt-get clean
 
-# Upgrade pip and install dependencies
-RUN pip install --upgrade pip
-RUN pip install -r requirements.txt
+# Install Python dependencies
+COPY requirements.txt .
+RUN pip install --upgrade pip && pip install -r requirements.txt
 
-# Expose the port FastAPI will run on
-EXPOSE 10000
+# Copy source code
+COPY . .
 
-# Start the FastAPI app with uvicorn (adjust path if needed)
-CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "10000"]
+# Default command to run the API
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "10000"]
+

@@ -1,12 +1,12 @@
-import json
 import os
+import json
 from datetime import datetime, timedelta
 from typing import List, Optional
 from google.ads.googleads.client import GoogleAdsClient
 from google.ads.googleads.errors import GoogleAdsException
 from pydantic import BaseModel
 
-# === Account name to ID mapping ===
+# === Constants ===
 ACCOUNT_MAP = {
     "Satilla Family Smiles (SFS)": "5616230554",
     "First National Bank of Mount Dora": "3035218698",
@@ -33,7 +33,6 @@ ACCOUNT_MAP = {
     "Tristate Siding": "3229754921",
 }
 
-COMPETITOR_BRANDS = ["smith", "clear choice", "comfort dental", "brident", "aspen"]
 SHARED_LIST_NAME = "Low-quality Searches & Words"
 COMPETITOR_LIST_NAME = "Competitor Terms"
 
@@ -43,28 +42,7 @@ AUTO_EXCLUDE_TERMS = set([
     "career", "classifieds", "school", "resume", "pet", "ebook", "amazon", "temu", "walmart"
 ])
 
-# === OAuth + Google Ads setup ===
-BASE_DIR = os.path.dirname(__file__)
-with open(os.path.join(BASE_DIR, "google_ads_token.json")) as f:
-    token_data = json.load(f)
-with open(os.path.join(BASE_DIR, "client_secret.json")) as f:
-    client_config = json.load(f)
-
-client_id = client_config.get("installed", {}).get("client_id") or client_config.get("web", {}).get("client_id")
-client_secret = client_config.get("installed", {}).get("client_secret") or client_config.get("web", {}).get("client_secret")
-
-config = {
-    "developer_token": "5dgO8PwWUCrkFzmgY1b_YA",
-    "refresh_token": token_data["refresh_token"],
-    "client_id": client_id,
-    "client_secret": client_secret,
-    "login_customer_id": "7297816540",
-    "use_proto_plus": True,
-}
-
-client = GoogleAdsClient.load_from_dict(config)
-
-# === Data Models ===
+# === Pydantic Models ===
 class AccountInfo(BaseModel):
     name: str
     id: str
@@ -75,11 +53,38 @@ class FlaggedTerm(BaseModel):
     reason: str
     is_competitor: bool
 
-# === Public Helpers ===
+# === Google Ads Client Setup ===
+def get_ads_client():
+    google_ads_token = os.getenv("GOOGLE_ADS_TOKEN")
+    if not google_ads_token:
+        raise ValueError("Missing GOOGLE_ADS_TOKEN secret")
+
+    token_data = json.loads(google_ads_token)
+
+    with open(os.path.join(os.path.dirname(__file__), "client_secret.json")) as f:
+        client_config = json.load(f)
+
+    client_id = client_config.get("installed", {}).get("client_id") or client_config.get("web", {}).get("client_id")
+    client_secret = client_config.get("installed", {}).get("client_secret") or client_config.get("web", {}).get("client_secret")
+
+    config = {
+        "developer_token": "5dgO8PwWUCrkFzmgY1b_YA",
+        "refresh_token": token_data["refresh_token"],
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "login_customer_id": "7297816540",
+        "use_proto_plus": True,
+    }
+
+    return GoogleAdsClient.load_from_dict(config)
+
+client = get_ads_client()
+
+# === Public helper ===
 def get_available_accounts() -> List[AccountInfo]:
     return [AccountInfo(name=name, id=aid) for name, aid in ACCOUNT_MAP.items()]
 
-# === Internal Functions ===
+# === Google Ads Helper Functions ===
 def get_campaigns(customer_id: str):
     query = """
         SELECT campaign.id, campaign.name
@@ -107,25 +112,22 @@ def flag_terms(terms: List[str]) -> List[FlaggedTerm]:
         reason = None
         trouble_word = None
 
-        for brand in COMPETITOR_BRANDS:
-            if brand in term_lower:
-                reason = f"Competitor term: {brand}"
-                trouble_word = brand
+        for word in AUTO_EXCLUDE_TERMS:
+            if word in term_lower:
+                reason = f"Matched disqualifier: {word}"
+                trouble_word = word
                 break
 
-        if not reason:
-            for word in AUTO_EXCLUDE_TERMS:
-                if word in term_lower:
-                    reason = f"Matched disqualifier: {word}"
-                    trouble_word = word
-                    break
+        if not reason and any(w in term_lower for w in term_lower.split()):
+            reason = "Suspected competitor term"
+            trouble_word = term_lower.split()[0]
 
         if reason:
             flagged.append(FlaggedTerm(
                 search_term=term,
                 trouble_word=trouble_word,
                 reason=reason,
-                is_competitor="Competitor" in reason
+                is_competitor="competitor" in reason.lower()
             ))
     return flagged
 
@@ -165,7 +167,7 @@ def add_negatives_to_list(customer_id: str, list_id: str, terms: List[FlaggedTer
     if operations:
         service.mutate_shared_criteria(customer_id=customer_id, operations=operations)
 
-# === Core Orchestration ===
+# === Core Cleaner Logic ===
 def run_cleaner(
     selected_names: List[str],
     start_date: Optional[str] = None,

@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: search-terms-cleaner
+    env: docker
+    plan: free
+    autoDeploy: true
+    envVars:
+      - key: API_SECRET
+        value: search-terms-cleaner-2025!
+      - key: GOOGLE_ADS_TOKEN
+        sync: false  # Set manually or via Render dashboard (recommended)

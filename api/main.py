@@ -1,46 +1,58 @@
-import sys
-import os
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "search_terms_cleaner")))
-
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
-from cleaner import run_cleaner, get_available_accounts, AccountInfo
+import os
+
+from cleaner import get_available_accounts, run_cleaner
 
 app = FastAPI()
 
-# === Request models ===
+# === CORS (optional for GPT/Render use) ===
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Adjust if needed for security
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# === Request Models ===
 class ScanRequest(BaseModel):
-    account_names: List[str]
-    start_date: Optional[str] = None  # YYYYMMDD
-    end_date: Optional[str] = None    # YYYYMMDD
+    accounts: List[str]
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
 
 class ApplyRequest(BaseModel):
-    account_name: str
-    approved_indices: List[int]
+    accounts: List[str]
+    apply_indices: List[int]  # Indices of approved flagged terms
 
-# === Endpoints ===
-@app.get("/accounts", response_model=List[AccountInfo])
+# === Routes ===
+@app.get("/accounts")
 def list_accounts():
     return get_available_accounts()
 
 @app.post("/scan")
-def scan_accounts(request: ScanRequest):
-    return run_cleaner(
-        selected_names=request.account_names,
-        start_date=request.start_date,
-        end_date=request.end_date,
-        interactive=False
-    )
+def scan_terms(req: ScanRequest):
+    try:
+        result = run_cleaner(
+            selected_names=req.accounts,
+            start_date=req.start_date,
+            end_date=req.end_date,
+            interactive=False
+        )
+        return {"status": "success", "results": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/apply")
-def apply_approved(request: ApplyRequest):
-    return run_cleaner(
-        selected_names=[request.account_name],
-        apply_indices=request.approved_indices,
-        interactive=False
-    )
-
-@app.get("/")
-def root():
-    return {"status": "ok"}
+def apply_terms(req: ApplyRequest):
+    try:
+        result = run_cleaner(
+            selected_names=req.accounts,
+            apply_indices=req.apply_indices,
+            interactive=False
+        )
+        return {"status": "applied", "results": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
