@@ -1,0 +1,4 @@
+fastapi
+uvicorn
+google-ads==24.0.0
+python-multipart
