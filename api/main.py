@@ -40,3 +40,7 @@ def apply_approved(request: ApplyRequest):
         apply_indices=request.approved_indices,
         interactive=False
     )
+
+@app.get("/")
+def root():
+    return {"status": "ok"}
