@@ -1,13 +1,18 @@
 import os
 import json
+import logging
 from datetime import datetime, timedelta
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from google.ads.googleads.client import GoogleAdsClient
 from google.ads.googleads.errors import GoogleAdsException
 from pydantic import BaseModel
 
+# === Setup Logging ===
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 # === Constants ===
-ACCOUNT_MAP = {
+ACCOUNT_MAP: Dict[str, str] = {
     "Satilla Family Smiles (SFS)": "5616230554",
     "First National Bank of Mount Dora": "3035218698",
     "Gabaie & Associates": "6666797635",
@@ -42,7 +47,7 @@ AUTO_EXCLUDE_TERMS = set([
     "career", "classifieds", "school", "resume", "pet", "ebook", "amazon", "temu", "walmart"
 ])
 
-# === Pydantic Models ===
+# === Data Models ===
 class AccountInfo(BaseModel):
     name: str
     id: str
@@ -53,11 +58,16 @@ class FlaggedTerm(BaseModel):
     reason: str
     is_competitor: bool
 
-# === Google Ads Client Setup ===
-def get_ads_client():
+# === Google Ads Setup ===
+def get_ads_client() -> GoogleAdsClient:
+    """Creates a Google Ads client using env variables and client_secret.json."""
+    dev_token = os.getenv("GOOGLE_ADS_DEVELOPER_TOKEN")
+    if not dev_token:
+        raise ValueError("Missing GOOGLE_ADS_DEVELOPER_TOKEN env var")
+
     google_ads_token = os.getenv("GOOGLE_ADS_TOKEN")
     if not google_ads_token:
-        raise ValueError("Missing GOOGLE_ADS_TOKEN secret")
+        raise ValueError("Missing GOOGLE_ADS_TOKEN env var")
 
     token_data = json.loads(google_ads_token)
 
@@ -68,7 +78,7 @@ def get_ads_client():
     client_secret = client_config.get("installed", {}).get("client_secret") or client_config.get("web", {}).get("client_secret")
 
     config = {
-        "developer_token": "5dgO8PwWUCrkFzmgY1b_YA",
+        "developer_token": dev_token,
         "refresh_token": token_data["refresh_token"],
         "client_id": client_id,
         "client_secret": client_secret,
@@ -78,24 +88,108 @@ def get_ads_client():
 
     return GoogleAdsClient.load_from_dict(config)
 
-client = get_ads_client()
-
-# === Public helper ===
+# === Public API ===
 def get_available_accounts() -> List[AccountInfo]:
-    return [AccountInfo(name=name, id=aid) for name, aid in ACCOUNT_MAP.items()]
+    """Returns a list of available accounts (name + ID)."""
+    return [AccountInfo(name=k, id=v) for k, v in ACCOUNT_MAP.items()]
 
-# === Google Ads Helper Functions ===
-def get_campaigns(customer_id: str):
+# === Core Logic ===
+def run_cleaner(
+    selected_names: List[str],
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    apply_indices: Optional[List[int]] = None,
+    interactive: bool = True
+) -> List[Dict[str, Any]]:
+    """Main entry point for cleaning flagged search terms."""
+    client = get_ads_client()
+    today = datetime.today()
+    start = start_date or (today - timedelta(days=29)).strftime("%Y%m%d")
+    end = end_date or today.strftime("%Y%m%d")
+    report = []
+
+    for name in selected_names:
+        acct_id = str(ACCOUNT_MAP.get(name))
+        if not acct_id:
+            report.append({"account": name, "error": "Account not found"})
+            continue
+
+        logger.info(f"🔍 Scanning account: {name} → {acct_id}")
+        account_report = {"account": name, "flagged": [], "applied": []}
+        try:
+            all_flagged = []
+            for row in get_campaigns(client, acct_id):
+                campaign_id = row.campaign.id
+                terms = get_search_terms(client, acct_id, campaign_id, start, end)
+                all_flagged.extend(flag_terms(terms))
+
+            account_report["flagged"] = all_flagged
+
+            if not all_flagged:
+                report.append(account_report)
+                continue
+
+            # === Handle approval (interactive or automated) ===
+            if apply_indices is not None:
+                approved = [all_flagged[i] for i in apply_indices if 0 <= i < len(all_flagged)]
+            elif interactive:
+                for i, term in enumerate(all_flagged, 1):
+                    print(f"{i}. '{term.search_term}' ({term.reason})")
+                sel = input("✅ Approve? (e.g. 1,3 or 'all'): ").strip().lower()
+                approved = []
+                if sel == "all":
+                    approved = all_flagged
+                else:
+                    for i in sel.split(","):
+                        try:
+                            idx = int(i.strip()) - 1
+                            if 0 <= idx < len(all_flagged):
+                                approved.append(all_flagged[idx])
+                        except ValueError:
+                            continue
+            else:
+                approved = []
+
+            if not approved:
+                report.append(account_report)
+                continue
+
+            # === Segment terms ===
+            competitors = [t for t in approved if t.is_competitor]
+            general = [t for t in approved if not t.is_competitor]
+
+            # === Add to shared lists ===
+            if general:
+                sid = find_shared_list(client, acct_id, SHARED_LIST_NAME) or create_shared_list(client, acct_id, SHARED_LIST_NAME)
+                add_negatives_to_list(client, acct_id, sid, general)
+                account_report["applied"].extend(general)
+
+            if competitors:
+                cid = find_shared_list(client, acct_id, COMPETITOR_LIST_NAME)
+                if cid:
+                    add_negatives_to_list(client, acct_id, cid, competitors)
+                    account_report["applied"].extend(competitors)
+                else:
+                    account_report["warning"] = "Competitor list not found"
+
+        except GoogleAdsException as e:
+            account_report["error"] = str(e)
+
+        report.append(account_report)
+
+    return report
+
+# === Helpers ===
+def get_campaigns(client: GoogleAdsClient, customer_id: str):
     query = """
         SELECT campaign.id, campaign.name
         FROM campaign
         WHERE campaign.status = 'ENABLED'
         AND campaign.advertising_channel_type = 'SEARCH'
     """
-    service = client.get_service("GoogleAdsService")
-    return service.search(customer_id=customer_id, query=query)
+    return client.get_service("GoogleAdsService").search(customer_id=customer_id, query=query)
 
-def get_search_terms(customer_id: str, campaign_id: int, start: str, end: str) -> List[str]:
+def get_search_terms(client: GoogleAdsClient, customer_id: str, campaign_id: int, start: str, end: str) -> List[str]:
     query = f"""
         SELECT search_term_view.search_term
         FROM search_term_view
@@ -109,18 +203,18 @@ def flag_terms(terms: List[str]) -> List[FlaggedTerm]:
     flagged = []
     for term in terms:
         term_lower = term.lower()
-        reason = None
         trouble_word = None
+        reason = None
 
         for word in AUTO_EXCLUDE_TERMS:
             if word in term_lower:
-                reason = f"Matched disqualifier: {word}"
                 trouble_word = word
+                reason = f"Matched disqualifier: {word}"
                 break
 
-        if not reason and any(w in term_lower for w in term_lower.split()):
+        if not reason and "competitor" in term_lower:
+            trouble_word = "competitor"
             reason = "Suspected competitor term"
-            trouble_word = term_lower.split()[0]
 
         if reason:
             flagged.append(FlaggedTerm(
@@ -129,20 +223,20 @@ def flag_terms(terms: List[str]) -> List[FlaggedTerm]:
                 reason=reason,
                 is_competitor="competitor" in reason.lower()
             ))
+
     return flagged
 
-def find_shared_list(customer_id: str, list_name: str) -> Optional[str]:
-    service = client.get_service("GoogleAdsService")
+def find_shared_list(client: GoogleAdsClient, customer_id: str, list_name: str) -> Optional[str]:
     query = f"""
         SELECT shared_set.id, shared_set.name
         FROM shared_set
         WHERE shared_set.name = '{list_name}'
         AND shared_set.type = 'NEGATIVE_KEYWORDS'
     """
-    results = list(service.search(customer_id=customer_id, query=query))
+    results = list(client.get_service("GoogleAdsService").search(customer_id=customer_id, query=query))
     return results[0].shared_set.id if results else None
 
-def create_shared_list(customer_id: str, list_name: str) -> str:
+def create_shared_list(client: GoogleAdsClient, customer_id: str, list_name: str) -> str:
     shared_set_service = client.get_service("SharedSetService")
     operation = client.get_type("SharedSetOperation")
     shared_set = operation.create
@@ -151,12 +245,17 @@ def create_shared_list(customer_id: str, list_name: str) -> str:
     result = shared_set_service.mutate_shared_sets(customer_id=customer_id, operations=[operation])
     return result.results[0].resource_name.split("/")[-1]
 
-def add_negatives_to_list(customer_id: str, list_id: str, terms: List[FlaggedTerm]):
+def add_negatives_to_list(client: GoogleAdsClient, customer_id: str, list_id: str, terms: List[FlaggedTerm]):
     service = client.get_service("SharedCriterionService")
     operations = []
+    seen = set()
 
     for t in terms:
-        for text in [t.search_term, t.trouble_word]:
+        for text in [t.trouble_word]:  # Only use trouble_word for broader safety
+            if not text or text.lower() in seen:
+                continue
+            seen.add(text.lower())
+
             op = client.get_type("SharedCriterionOperation")
             crit = op.create
             crit.shared_set = f"customers/{customer_id}/sharedSets/{list_id}"
@@ -166,77 +265,3 @@ def add_negatives_to_list(customer_id: str, list_id: str, terms: List[FlaggedTer
 
     if operations:
         service.mutate_shared_criteria(customer_id=customer_id, operations=operations)
-
-# === Core Cleaner Logic ===
-def run_cleaner(
-    selected_names: List[str],
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    apply_indices: Optional[List[int]] = None,
-    interactive: bool = True
-):
-    today = datetime.today()
-    start = start_date or (today - timedelta(days=29)).strftime("%Y%m%d")
-    end = end_date or today.strftime("%Y%m%d")
-
-    report = []
-
-    for name in selected_names:
-        acct_id = ACCOUNT_MAP.get(name)
-        if not acct_id:
-            report.append({"account": name, "error": "Account not found"})
-            continue
-
-        account_report = {"account": name, "flagged": [], "applied": []}
-        try:
-            all_flagged = []
-            campaigns = get_campaigns(acct_id)
-            for row in campaigns:
-                campaign_id = row.campaign.id
-                terms = get_search_terms(acct_id, campaign_id, start, end)
-                all_flagged.extend(flag_terms(terms))
-
-            account_report["flagged"] = all_flagged
-
-            if not all_flagged:
-                report.append(account_report)
-                continue
-
-            if apply_indices is not None:
-                approved = [all_flagged[i] for i in apply_indices if 0 <= i < len(all_flagged)]
-            elif interactive:
-                for i, term in enumerate(all_flagged, 1):
-                    print(f"{i}. '{term.search_term}' ({term.reason})")
-                sel = input("✅ Approve? (e.g. 1,3 or 'all'): ").strip().lower()
-                approved = all_flagged if sel == "all" else [
-                    all_flagged[int(i.strip()) - 1] for i in sel.split(",") if i.strip().isdigit()
-                ]
-            else:
-                approved = []
-
-            if not approved:
-                report.append(account_report)
-                continue
-
-            competitors = [t for t in approved if t.is_competitor]
-            general = [t for t in approved if not t.is_competitor]
-
-            if general:
-                sid = find_shared_list(acct_id, SHARED_LIST_NAME) or create_shared_list(acct_id, SHARED_LIST_NAME)
-                add_negatives_to_list(acct_id, sid, general)
-                account_report["applied"].extend(general)
-
-            if competitors:
-                cid = find_shared_list(acct_id, COMPETITOR_LIST_NAME)
-                if cid:
-                    add_negatives_to_list(acct_id, cid, competitors)
-                    account_report["applied"].extend(competitors)
-                else:
-                    account_report["warning"] = "Competitor list not found"
-
-        except GoogleAdsException as e:
-            account_report["error"] = str(e)
-
-        report.append(account_report)
-
-    return report
