@@ -14,9 +14,11 @@ RUN apt-get update && apt-get install -y \
 
 # Copy Python requirements
 COPY requirements.txt /app/requirements.txt
+
+# Install Python packages
 RUN pip install --upgrade pip && pip install -r /app/requirements.txt
 
-# Copy all source code from the search_terms_cleaner folder into container
+# Copy source code
 COPY search_terms_cleaner/ /app/search_terms_cleaner
 
 # Copy secret file (Render secret mount will make this available)
