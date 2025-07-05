@@ -19,5 +19,8 @@ RUN pip install --upgrade pip && pip install -r /app/requirements.txt
 # Copy all source code from the search_terms_cleaner folder into container
 COPY search_terms_cleaner/ /app/search_terms_cleaner
 
-# Default command to run the API from inside /app/search_terms_cleaner
+# Copy secret file (Render secret mount will make this available)
+COPY client_secret.json /app/search_terms_cleaner/client_secret.json
+
+# Default command to run the API
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "10000"]
