@@ -15,7 +15,7 @@ DEVELOPER_TOKEN = os.getenv("GOOGLE_ADS_DEVELOPER_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 # Initialize Google Ads client
-client = GoogleAdsClient.load_from_storage("search_terms_cleaner/google-ads.yaml")
+client = GoogleAdsClient.load_from_storage()
 
 # === Dummy Account Map ===
 ACCOUNT_MAP = {
