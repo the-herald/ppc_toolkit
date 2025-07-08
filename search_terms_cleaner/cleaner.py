@@ -2,33 +2,51 @@ import os
 import json
 import logging
 from typing import List, Dict
-from dotenv import load_dotenv
 from google.ads.googleads.client import GoogleAdsClient
 from google.ads.googleads.errors import GoogleAdsException
+from google.ads.googleads.oauth2 import get_google_ads_credentials
 import openai
 
-load_dotenv()
-
+# === Logging Setup ===
 logging.basicConfig(level=logging.INFO)
 
+# === Environment Variables ===
 DEVELOPER_TOKEN = os.getenv("GOOGLE_ADS_DEVELOPER_TOKEN")
+CLIENT_ID = os.getenv("GOOGLE_ADS_CLIENT_ID")
+CLIENT_SECRET = os.getenv("GOOGLE_ADS_CLIENT_SECRET")
+REFRESH_TOKEN = os.getenv("GOOGLE_ADS_REFRESH_TOKEN")
+LOGIN_CUSTOMER_ID = os.getenv("GOOGLE_ADS_LOGIN_CUSTOMER_ID")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-# Initialize Google Ads client
-client = GoogleAdsClient.load_from_storage("/etc/secrets/google-ads.yaml")
+# === OpenAI Setup ===
+openai.api_key = OPENAI_API_KEY
 
-# === Dummy Account Map ===
-ACCOUNT_MAP = {
-    "First Doctors Weight Loss": "1462306408",
-    "Four Seasons Residences Las Vegas": "1335938339",
-}
-
-# === Disqualifying Keywords ===
+# === Disqualifying Root Words ===
 DISQUALIFIERS = [
     "cheap", "free", "affordable", "do it yourself", "jobs", "university",
     "wikipedia", "craigslist", "template", "sample", "how to", "salary",
     "career", "policy", "student", "definition", "internship"
 ]
+
+# === Real Account Map ===
+ACCOUNT_MAP = {
+    "Satilla Family Smiles (SFS)": "5616230554",
+    "First National Bank of Mount Dora": "3035218698",
+    "Gabaie & Associates": "6666797635",
+    "Godley Station Dental (GSD)": "6655601976",
+    "Three Ten Timber": "5692134970",
+    "Four Seasons Residences Las Vegas": "1335938339",
+    "First Doctors Weight Loss": "1462306408",
+    "BallparkDJ": "5287833435",
+    "Andrew Casey Electrical Contractors": "6807963143",
+    "Precise Home": "5392828629",
+    "Dynamic Warehouse": "6309687513",
+    "Rosco Generators": "3962597664",
+    "Heart to Home Meals Franchise": "2206893203",
+    "Tristate Roofing": "4224597425",
+    "CapioRN": "3020635710",
+    "UC Components": "3229754921"
+}
 
 # === Google Ads Query ===
 SEARCH_TERM_QUERY = """
@@ -44,12 +62,10 @@ SEARCH_TERM_QUERY = """
 """
 
 # === AI Flagging ===
-openai.api_key = OPENAI_API_KEY
-
 def ai_flag_terms(terms: List[str]) -> List[Dict]:
     prompt = (
         "You are an expert in Google Ads. For each of the following search terms, decide if it's irrelevant or a competitor. "
-        "Return results as JSON list with: search_term, flag_type ('irrelevant' or 'competitor'), and reason.\n\n"
+        "Return a JSON list with each object containing: search_term, flag_type ('irrelevant' or 'competitor'), and reason.\n\n"
         f"Search terms:\n{json.dumps(terms)}"
     )
 
@@ -57,23 +73,37 @@ def ai_flag_terms(terms: List[str]) -> List[Dict]:
         response = openai.ChatCompletion.create(
             model="gpt-4",
             messages=[
-                {"role": "system", "content": "You're an expert Google Ads analyst."},
-                {"role": "user", "content": prompt},
+                {"role": "system", "content": "You're a senior-level Google Ads strategist."},
+                {"role": "user", "content": prompt}
             ],
-            temperature=0.3,
+            temperature=0.3
         )
-        reply = response['choices'][0]['message']['content']
+        reply = response["choices"][0]["message"]["content"]
         return json.loads(reply)
     except Exception as e:
-        logging.error(f"OpenAI error: {e}")
+        logging.error(f"OpenAI API error: {e}")
         return []
 
-# === Cleaner Core ===
+# === Client Factory ===
+def get_ads_client() -> GoogleAdsClient:
+    credentials = get_google_ads_credentials(
+        client_id=CLIENT_ID,
+        client_secret=CLIENT_SECRET,
+        refresh_token=REFRESH_TOKEN
+    )
+    return GoogleAdsClient.load_from_dict({
+        "developer_token": DEVELOPER_TOKEN,
+        "login_customer_id": LOGIN_CUSTOMER_ID,
+        "credentials": credentials
+    })
+
+# === Core Functions ===
 def get_available_accounts() -> List[str]:
     return list(ACCOUNT_MAP.values())
 
 def run_cleaner(account_id: str) -> Dict:
     try:
+        client = get_ads_client()
         ga_service = client.get_service("GoogleAdsService")
 
         search_request = client.get_type("SearchGoogleAdsStreamRequest")
@@ -104,5 +134,5 @@ def run_cleaner(account_id: str) -> Dict:
         }
 
     except GoogleAdsException as ex:
-        logging.error(f"Request failed: {ex}")
-        raise
+        logging.error(f"Google Ads API error: {ex}")
+        return {"error": str(ex)}

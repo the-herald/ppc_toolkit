@@ -1,5 +1,18 @@
+# Secrets & tokens
 client_secret.json
 google_ads_token.json
-exclude_keywords_old.py
 search_terms_cleaner/client_secret.json
-search_terms_cleaner/google-ads.yaml
+
+# Local-only files
+*.env
+.env.*
+*.log
+*.pyc
+__pycache__/
+
+# Old versions
+exclude_keywords_old.py
+
+# System files
+.DS_Store
+Thumbs.db
