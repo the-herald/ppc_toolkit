@@ -1,18 +1,19 @@
-# Secrets & tokens
-client_secret.json
-google_ads_token.json
-search_terms_cleaner/client_secret.json
-
-# Local-only files
-*.env
-.env.*
-*.log
-*.pyc
+.env
 __pycache__/
-
-# Old versions
-exclude_keywords_old.py
-
-# System files
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+ENV/
+.venv/
+.idea/
+.vscode/
+*.db
+*.sqlite3
+secrets/
+google-ads.yaml
+token.pickle
+*.log
 .DS_Store
-Thumbs.db
