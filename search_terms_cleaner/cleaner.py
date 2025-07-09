@@ -106,38 +106,39 @@ def ai_flag_terms(terms: List[str]) -> List[Dict]:
 def get_available_accounts() -> List[str]:
     return list(ACCOUNT_MAP.values())
 
-def run_cleaner(account_id: str) -> Dict:
+def run_cleaner(account_id: str) -> dict:
+    print(f"[DEBUG] Starting cleaner for account ID: {account_id}")
+
     try:
-        client = get_client()
+        client = get_google_ads_client()  # however you're initializing the client
         ga_service = client.get_service("GoogleAdsService")
 
-        search_request = client.get_type("SearchGoogleAdsStreamRequest")
-        search_request.customer_id = account_id
-        search_request.query = SEARCH_TERM_QUERY
+        query = """
+        SELECT
+          campaign.id,
+          ad_group.id,
+          search_term_view.search_term,
+          metrics.impressions,
+          metrics.clicks,
+          metrics.conversions
+        FROM search_term_view
+        WHERE segments.date DURING LAST_30_DAYS
+        """
 
-        response = ga_service.search_stream(request=search_request)
+        response = ga_service.search_stream(customer_id=account_id, query=query)
 
-        flagged_terms = []
-        auto_excluded = []
-
+        results = []
         for batch in response:
             for row in batch.results:
-                term = row.search_term_view.search_term.lower()
-                if any(d in term for d in DISQUALIFIERS):
-                    auto_excluded.append({
-                        "search_term": term,
-                        "reason": "Contains disqualifying word"
-                    })
-                else:
-                    flagged_terms.append(term)
+                results.append(row.search_term_view.search_term)
+        
+        if not results:
+            print(f"[DEBUG] No search term data found for account: {account_id}")
+            return {"status": "no_data", "account_id": account_id}
 
-        ai_results = ai_flag_terms(flagged_terms)
+        print(f"[DEBUG] Found {len(results)} search terms for account: {account_id}")
+        return {"status": "success", "count": len(results), "terms": results}
 
-        return {
-            "auto_excluded": auto_excluded,
-            "flagged_by_ai": ai_results
-        }
-
-    except GoogleAdsException as ex:
-        logging.error(f"Request failed: {ex}")
+    except Exception as e:
+        print(f"[ERROR] Failed to run cleaner on {account_id}: {e}")
         raise
