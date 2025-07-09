@@ -25,10 +25,10 @@ def list_accounts():
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/run-cleaner")
-def run_cleaner_endpoint(account_inputs: str = Query(..., description="Comma-separated list of account names or IDs")):
+def run_cleaner_endpoint(account_input: str = Query(..., description="Comma-separated list of account names or IDs")):
     try:
         results = []
-        inputs = [s.strip() for s in account_inputs.split(",")]
+        inputs = [s.strip() for s in account_input.split(",")]
 
         for input_str in inputs:
             account_id = None
