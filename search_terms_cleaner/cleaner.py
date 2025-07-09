@@ -67,14 +67,18 @@ SEARCH_TERM_QUERY = """
 """
 
 # === Initialize Google Ads Client ===
-def get_client():
+def get_client(account_id: str):
     return GoogleAdsClient.load_from_dict({
         "developer_token": DEVELOPER_TOKEN,
-        "client_id": CLIENT_ID,
-        "client_secret": CLIENT_SECRET,
-        "refresh_token": REFRESH_TOKEN,
         "login_customer_id": LOGIN_CUSTOMER_ID,
-        "use_proto_plus": True
+        "linked_customer_id": account_id,
+        "use_proto_plus": True,
+        "credentials": {
+            "client_id": CLIENT_ID,
+            "client_secret": CLIENT_SECRET,
+            "refresh_token": REFRESH_TOKEN,
+            "type": "authorized_user"
+        }
     })
 
 # === AI Flagging ===
@@ -110,7 +114,7 @@ def run_cleaner(account_id: str) -> dict:
     print(f"[DEBUG] Starting cleaner for account ID: {account_id}")
 
     try:
-        client = get_client()  # however you're initializing the client
+        client = get_client(account_id)  # however you're initializing the client
         ga_service = client.get_service("GoogleAdsService")
 
         query = """
