@@ -21,29 +21,29 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 # === Real Account Map ===
 ACCOUNT_MAP = {
-    "Satilla Family Smiles (SFS) (Satilla)": "5616230554",  # SFS
-    "First National Bank of Mount Dora (FNBMD) (First National)": "3035218698",  # FNBMD, First National
-    "Gabaie & Associates (Gabaie)": "6666797635",  # Gabaie
-    "Godley Station Dental (GSD) (Godley Station (or just Godley))": "6655601976",  # GSD, Godley Station, Godley
-    "Three Ten Timber (Three Ten Timber)": "5692134970",  # Three Ten Timber
-    "Four Seasons Residences Las Vegas (Four Seasons) (Four Seasons Residences)": "1335938339",  # Four Seasons
-    "First Doctors Weight Loss (First Doctors)": "1462306408",  # First Doctors
+    "Satilla Family Smiles (SFS) (Satilla)": "5616230554",
+    "First National Bank of Mount Dora (FNBMD) (First National)": "3035218698",
+    "Gabaie & Associates (Gabaie)": "6666797635",
+    "Godley Station Dental (GSD) (Godley Station) (Godley)": "6655601976",
+    "Three Ten Timber (Three Ten)": "5692134970",
+    "Four Seasons Residences Las Vegas (FSRLV) (Four Seasons) (Four Seasons Residences)": "1335938339",
+    "First Doctors Weight Loss (FDWL) (First Doctors)": "1462306408",
     "BallparkDJ": "5287833435",
-    "Andrew Casey Electrical Contractors (Andrew Casey)": "6807963143",  # Andrew Casey
-    "Precise Home": "5392828629",
-    "Dynamic Warehouse": "6309687513",
-    "Rosco Generators": "3962597664",
-    "Heart to Home Meals (Heart To Home) (H2H)": "2206893203",  # Heart To Home, H2H
-    "UC Components": "3020635710",
-    "CapioRN (Capio)": "3030064078",  # Capio
-    "Iowa Countertops": "9552845701",
-    "Action Engraving": "4224597425",
-    "ScribbleVet": "6555309398",
-    "Woodlands Family Dental (Woodlands)": "3466831668",  # Woodlands
-    "Sound Concrete Solutions (Sound Concrete)": "3168167882",  # Sound Concrete
-    "Bullet Proof Diesel (Bullet Proof)": "9162462492",  # Bullet Proof
-    "Tristate Siding (Tristate)": "3229754921",  # Tristate
-    "Sign Systems": "8343552815",
+    "Andrew Casey Electrical Contractors (ACEC) (Andrew Casey)": "6807963143",
+    "Precise Home (Precise)": "5392828629",
+    "Dynamic Warehouse (Dynamic)": "6309687513",
+    "Rosco Generators (Rosco)": "3962597664",
+    "Heart to Home Meals (HTHM) (Heart to Home) (H2H)": "2206893203",
+    "UC Components (UC)": "3020635710",
+    "CapioRN (Capio)": "3030064078",
+    "Iowa Countertops (Iowa)": "9552845701",
+    "Action Engraving (Action)": "4224597425",
+    "ScribbleVet (Scribble)": "6555309398",
+    "Woodlands Family Dental (Woodlands)": "3466831668",
+    "Sound Concrete Solutions (Sound Concrete)": "3168167882",
+    "Bullet Proof Diesel (BPD) (Bullet Proof)": "9162462492",
+    "Tristate Siding (Tristate)": "3229754921",
+    "Sign Systems (Sign)": "8343552815",
 }
 
 # === Disqualifiers ===
