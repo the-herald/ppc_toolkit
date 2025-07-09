@@ -110,7 +110,7 @@ def run_cleaner(account_id: str) -> dict:
     print(f"[DEBUG] Starting cleaner for account ID: {account_id}")
 
     try:
-        client = get_google_ads_client()  # however you're initializing the client
+        client = get_client()  # however you're initializing the client
         ga_service = client.get_service("GoogleAdsService")
 
         query = """
