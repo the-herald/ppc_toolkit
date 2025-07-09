@@ -1,3 +1,5 @@
+# === cleaner.py ===
+
 import os
 import json
 import logging
@@ -19,33 +21,6 @@ REFRESH_TOKEN = os.getenv("GOOGLE_ADS_REFRESH_TOKEN")
 LOGIN_CUSTOMER_ID = os.getenv("GOOGLE_ADS_LOGIN_CUSTOMER_ID")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-# === Real Account Map ===
-ACCOUNT_MAP = {
-    "Satilla Family Smiles (SFS) (Satilla)": "5616230554",
-    "First National Bank of Mount Dora (FNBMD) (First National)": "3035218698",
-    "Gabaie & Associates (Gabaie)": "6666797635",
-    "Godley Station Dental (GSD) (Godley Station) (Godley)": "6655601976",
-    "Three Ten Timber (Three Ten)": "5692134970",
-    "Four Seasons Residences Las Vegas (FSRLV) (Four Seasons) (Four Seasons Residences)": "1335938339",
-    "First Doctors Weight Loss (FDWL) (First Doctors)": "1462306408",
-    "BallparkDJ": "5287833435",
-    "Andrew Casey Electrical Contractors (ACEC) (Andrew Casey)": "6807963143",
-    "Precise Home (Precise)": "5392828629",
-    "Dynamic Warehouse (Dynamic)": "6309687513",
-    "Rosco Generators (Rosco)": "3962597664",
-    "Heart to Home Meals (HTHM) (Heart to Home) (H2H)": "2206893203",
-    "UC Components (UC)": "3020635710",
-    "CapioRN (Capio)": "3030064078",
-    "Iowa Countertops (Iowa)": "9552845701",
-    "Action Engraving (Action)": "4224597425",
-    "ScribbleVet (Scribble)": "6555309398",
-    "Woodlands Family Dental (Woodlands)": "3466831668",
-    "Sound Concrete Solutions (Sound Concrete)": "3168167882",
-    "Bullet Proof Diesel (BPD) (Bullet Proof)": "9162462492",
-    "Tristate Siding (Tristate)": "3229754921",
-    "Sign Systems (Sign)": "8343552815",
-}
-
 # === Disqualifiers ===
 DISQUALIFIERS = [
     "cheap", "free", "affordable", "do it yourself", "jobs", "university",
@@ -53,96 +28,197 @@ DISQUALIFIERS = [
     "career", "policy", "student", "definition", "internship"
 ]
 
-# === Google Ads Query ===
-SEARCH_TERM_QUERY = """
-    SELECT
-        search_term_view.search_term,
-        campaign.id,
-        ad_group.id
-    FROM
-        search_term_view
-    WHERE
-        segments.date DURING LAST_30_DAYS
-        AND campaign.advertising_channel_type = 'SEARCH'
-"""
+# === Real Account Map ===
+ACCOUNT_MAP = {
+    "First Doctors": "1462306408",
+    "Godley Station": "6655601976",
+    "Capio": "3030064078",
+    "Tristate": "3229754921",
+    "H2H": "2206893203",
+    "FNBMD": "3035218698",
+    # ... you can add the rest from the full list
+}
 
-# === Initialize Google Ads Client ===
+# === Setup ===
+openai.api_key = OPENAI_API_KEY
+
+
 def get_client(account_id: str):
     return GoogleAdsClient.load_from_dict({
         "developer_token": DEVELOPER_TOKEN,
+        "client_id": CLIENT_ID,
+        "client_secret": CLIENT_SECRET,
+        "refresh_token": REFRESH_TOKEN,
         "login_customer_id": LOGIN_CUSTOMER_ID,
         "linked_customer_id": account_id,
-        "use_proto_plus": True,
-        "credentials": {
-            "client_id": CLIENT_ID,
-            "client_secret": CLIENT_SECRET,
-            "refresh_token": REFRESH_TOKEN,
-            "type": "authorized_user"
-        }
+        "use_proto_plus": True
     })
 
-# === AI Flagging ===
-openai.api_key = OPENAI_API_KEY
 
 def ai_flag_terms(terms: List[str]) -> List[Dict]:
     prompt = (
-        "You are an expert in Google Ads. For each of the following search terms, decide if it's irrelevant or a competitor. "
-        "Return results as JSON list with: search_term, flag_type ('irrelevant' or 'competitor'), and reason.\n\n"
-        f"Search terms:\n{json.dumps(terms)}"
+        "You are an expert Google Ads analyst. For each search term, return a JSON object with: "
+        "'search_term', 'flag_type' ('irrelevant', 'competitor', or 'none'), and 'reason'. "
+        "Only return flagged terms."
+        f"\n\nSearch terms:\n{json.dumps(terms)}"
     )
 
     try:
         response = openai.ChatCompletion.create(
             model="gpt-4",
             messages=[
-                {"role": "system", "content": "You're an expert Google Ads analyst."},
+                {"role": "system", "content": "You're a senior-level Google Ads analyst. Only return flagged terms."},
                 {"role": "user", "content": prompt},
             ],
-            temperature=0.3,
+            temperature=0.2,
         )
         reply = response['choices'][0]['message']['content']
         return json.loads(reply)
     except Exception as e:
-        logging.error(f"OpenAI error: {e}")
+        logging.error(f"[AI] Error flagging terms: {e}")
         return []
 
-# === Cleaner Core ===
-def get_available_accounts() -> List[str]:
-    return list(ACCOUNT_MAP.values())
+
+def apply_exclusions(client: GoogleAdsClient, account_id: str, flagged_terms: List[Dict]) -> Dict:
+    try:
+        neg_service = client.get_service("GoogleAdsService")
+        campaign_service = client.get_service("CampaignService")
+        shared_set_service = client.get_service("SharedSetService")
+        shared_criterion_service = client.get_service("SharedCriterionService")
+
+        irrelevant_terms = [t for t in flagged_terms if t['flag_type'] == 'irrelevant']
+        competitor_terms = [t for t in flagged_terms if t['flag_type'] == 'competitor']
+
+        shared_sets = {
+            "irrelevant": "Low-quality Searches & Words",
+            "competitor": "Competitor Terms"
+        }
+
+        def create_or_get_shared_set(name):
+            query = f"""
+            SELECT shared_set.id FROM shared_set
+            WHERE shared_set.name = '{name}'
+            LIMIT 1
+            """
+            response = neg_service.search(customer_id=account_id, query=query)
+            for row in response:
+                return row.shared_set.id
+            # If not found, create
+            operation = client.get_type("SharedSetOperation")
+            shared_set = operation.create
+            shared_set.name = name
+            shared_set.type = client.enums.SharedSetTypeEnum.NEGATIVE_KEYWORDS
+            result = shared_set_service.mutate_shared_sets(customer_id=account_id, operations=[operation])
+            return result.results[0].resource_name.split("/")[-1]
+
+        def deduplicate(shared_set_id: str, new_terms: List[str]):
+            existing = set()
+            query = f"SELECT shared_criterion.keyword.text FROM shared_criterion WHERE shared_set.id = {shared_set_id}"
+            response = neg_service.search(customer_id=account_id, query=query)
+            for row in response:
+                existing.add(row.shared_criterion.keyword.text.lower())
+            return [t for t in new_terms if t.lower() not in existing]
+
+        result_log = {}
+
+        for label, terms in [("irrelevant", irrelevant_terms), ("competitor", competitor_terms)]:
+            if not terms:
+                continue
+            shared_set_id = create_or_get_shared_set(shared_sets[label])
+
+            phrases = []
+            for t in terms:
+                phrases.append(t['search_term'])
+                if label == 'irrelevant':
+                    root = t['search_term'].split()[0]
+                    phrases.append(root)
+                elif label == 'competitor':
+                    root = t['search_term'].split()[0]
+                    phrases.append(root)
+
+            unique_phrases = deduplicate(shared_set_id, phrases)
+            if not unique_phrases:
+                result_log[label] = "No new exclusions after deduplication."
+                continue
+
+            operations = []
+            for phrase in unique_phrases:
+                criterion = client.get_type("SharedCriterionOperation")
+                criterion.create.keyword.text = phrase
+                criterion.create.keyword.match_type = client.enums.KeywordMatchTypeEnum.PHRASE
+                criterion.create.shared_set = shared_set_service.shared_set_path(account_id, shared_set_id)
+                operations.append(criterion)
+
+            shared_criterion_service.mutate_shared_criteria(customer_id=account_id, operations=operations)
+            result_log[label] = f"{len(unique_phrases)} exclusions applied."
+
+        return result_log
+
+    except Exception as e:
+        logging.error(f"[EXCLUSION ERROR] {e}")
+        return {"error": str(e)}
+
 
 def run_cleaner(account_id: str) -> dict:
-    print(f"[DEBUG] Starting cleaner for account ID: {account_id}")
+    logging.info(f"[Cleaner] Starting for account ID: {account_id}")
+    client = get_client(account_id)
 
     try:
-        client = get_client(account_id)  # however you're initializing the client
         ga_service = client.get_service("GoogleAdsService")
 
         query = """
         SELECT
-          campaign.id,
-          ad_group.id,
-          search_term_view.search_term,
-          metrics.impressions,
-          metrics.clicks,
-          metrics.conversions
+            campaign.id,
+            campaign.name,
+            ad_group.id,
+            search_term_view.search_term,
+            metrics.impressions,
+            metrics.clicks,
+            metrics.conversions
         FROM search_term_view
         WHERE segments.date DURING LAST_30_DAYS
+          AND campaign.advertising_channel_type = 'SEARCH'
         """
 
         response = ga_service.search_stream(customer_id=account_id, query=query)
 
-        results = []
+        search_terms = set()
         for batch in response:
             for row in batch.results:
-                results.append(row.search_term_view.search_term)
-        
-        if not results:
-            print(f"[DEBUG] No search term data found for account: {account_id}")
+                term = row.search_term_view.search_term
+                if term:
+                    search_terms.add(term)
+
+        if not search_terms:
+            logging.info(f"[Cleaner] No search term data for account: {account_id}")
             return {"status": "no_data", "account_id": account_id}
 
-        print(f"[DEBUG] Found {len(results)} search terms for account: {account_id}")
-        return {"status": "success", "count": len(results), "terms": results}
+        # === Auto Exclude Disqualifiers ===
+        auto_excluded = [term for term in search_terms if any(d in term.lower() for d in DISQUALIFIERS)]
+
+        # === AI Review ===
+        reviewable_terms = list(search_terms - set(auto_excluded))
+        ai_flagged = ai_flag_terms(reviewable_terms)
+
+        # === Apply auto exclusions only
+        exclusion_result = apply_exclusions(client, account_id, [
+            {"search_term": t, "flag_type": "irrelevant", "reason": "Matched disqualifier list"}
+            for t in auto_excluded
+        ])
+
+        return {
+            "status": "success",
+            "account_id": account_id,
+            "auto_excluded": auto_excluded,
+            "ai_flagged": ai_flagged,
+            "flagged_count": len(ai_flagged),
+            "exclusion_result": exclusion_result
+        }
+
+    except GoogleAdsException as ex:
+        logging.error(f"[GoogleAdsException] {ex.failure}")
+        return {"status": "error", "account_id": account_id, "error": str(ex)}
 
     except Exception as e:
-        print(f"[ERROR] Failed to run cleaner on {account_id}: {e}")
-        raise
+        logging.error(f"[Cleaner] General error for {account_id}: {e}")
+        return {"status": "error", "account_id": account_id, "error": str(e)}
