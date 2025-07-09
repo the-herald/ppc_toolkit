@@ -1,3 +1,4 @@
+
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from cleaner import get_available_accounts, run_cleaner, ACCOUNT_MAP
@@ -16,7 +17,12 @@ app.add_middleware(
 @app.get("/accounts")
 def list_accounts():
     try:
-        return {"accounts": list(ACCOUNT_MAP.values())}
+        return {
+            "accounts": [
+                {"name": name, "id": account_id}
+                for name, account_id in ACCOUNT_MAP.items()
+            ]
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
