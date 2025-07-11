@@ -183,7 +183,7 @@ def run_cleaner(account_id: str) -> dict:
           AND campaign.advertising_channel_type = 'SEARCH'
         '''
         logging.info(f"Type of account_id: {type(account_id)} — Value: {account_id}")
-        response = ga_service.search_stream(customer_id=str(account_id), query=query)
+        response = ga_service.search(customer_id=str(account_id), query=query)
         search_terms = set()
         for batch in response:
             for row in batch.results:
