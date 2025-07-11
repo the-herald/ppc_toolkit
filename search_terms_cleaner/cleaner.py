@@ -1,6 +1,3 @@
-
-# === cleaner.py ===
-
 import os
 import json
 import logging
@@ -97,7 +94,11 @@ def ai_flag_terms(terms: List[str]) -> List[Dict]:
             temperature=0.2,
         )
         reply = response['choices'][0]['message']['content']
-        return json.loads(reply)
+        try:
+            return json.loads(reply)
+        except json.JSONDecodeError:
+            logging.error(f"[AI] Failed to parse GPT reply:\n{reply}")
+            return []
     except Exception as e:
         logging.error(f"[AI] Error flagging terms: {e}")
         return []
@@ -122,7 +123,7 @@ def apply_exclusions(client: GoogleAdsClient, account_id: str, flagged_terms: Li
             response = neg_service.search(customer_id=account_id, query=query)
             for row in response:
                 return row.shared_set.id
-            operation = client.get_type("SharedSetOperation")
+            operation = client.get_type("SharedSetOperation")()
             shared_set = operation.create
             shared_set.name = name
             shared_set.type = client.enums.SharedSetTypeEnum.NEGATIVE_KEYWORDS
@@ -153,11 +154,12 @@ def apply_exclusions(client: GoogleAdsClient, account_id: str, flagged_terms: Li
                 continue
             operations = []
             for phrase in unique_phrases:
-                criterion = client.get_type("SharedCriterionOperation")
-                criterion.create.keyword.text = phrase
-                criterion.create.keyword.match_type = client.enums.KeywordMatchTypeEnum.PHRASE
-                criterion.create.shared_set = shared_set_service.shared_set_path(account_id, shared_set_id)
-                operations.append(criterion)
+                operation = client.get_type("SharedCriterionOperation")()
+                criterion = operation.create
+                criterion.keyword.text = phrase
+                criterion.keyword.match_type = client.enums.KeywordMatchTypeEnum.PHRASE
+                criterion.shared_set = shared_set_service.shared_set_path(account_id, shared_set_id)
+                operations.append(operation)
             shared_criterion_service.mutate_shared_criteria(customer_id=account_id, operations=operations)
             result_log[label] = f"{len(unique_phrases)} exclusions applied."
         return result_log
@@ -180,7 +182,8 @@ def run_cleaner(account_id: str) -> dict:
         WHERE segments.date DURING LAST_30_DAYS
           AND campaign.advertising_channel_type = 'SEARCH'
         '''
-        response = ga_service.search_stream(customer_id=account_id, query=query)
+        logging.info(f"Type of account_id: {type(account_id)} — Value: {account_id}")
+        response = ga_service.search_stream(customer_id=str(account_id), query=query)
         search_terms = set()
         for batch in response:
             for row in batch.results:
