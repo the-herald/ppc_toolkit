@@ -4,4 +4,4 @@ google-ads==15.1.0
 pydantic==1.10.13
 python-dotenv==1.0.1
 openai
-PyYAML==6.0.1
+PyYAML
